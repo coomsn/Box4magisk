@@ -1,0 +1,36 @@
+#!/system/bin/sh
+clear; cd ${0%/*}
+
+source ./box.scripts
+
+config_name="${config_file##*/}"
+prop_file="/data/adb/modules/box-module/module.prop"
+
+add_txt="${VERSION}${provider}"
+current_time=$(date "+%Y.%m.%d %H:%M")
+
+events=$1
+monitor_file=$3
+
+if [ "${monitor_file}" = "disable" ]; then #1
+  if [ "${events}" = "d" ]; then #2
+    if [ -n "$(net_id)" ]; then #2-1
+       sed -i "/description/c\description=🟢 proxy mode: ${mode} | bin: $add_txt | start time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🟢" ${prop_file}
+    else #2-1
+       sed -i "/description/c\description=🟢 proxy mode: ${mode} | bin: $add_txt | start time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🟢" ${prop_file}
+    fi #2-1
+    run_proxy  >/dev/null 2>&1
+  elif [ "${events}" = "n" ]; then #2
+    if [ -n "$(net_id)" ]; then #2-2
+       sed -i "/description/c\description=🔴proxy mode: ${mode} | bin: $add_txt | stop time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🔴" ${prop_file}
+    else #2-2
+       sed -i "/description/c\description=🔴proxy mode: ${mode} | bin: $add_txt | stop time: $current_time | ssid: $(net_id) | ip: $(net_ip) | config: $config_name 🔴" ${prop_file}
+    fi #2-2
+    stop_proxy  >/dev/null 2>&1 # stop
+  fi #2
+fi #1
+
+
+
+
+

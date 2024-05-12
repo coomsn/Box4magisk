@@ -1,0 +1,228 @@
+#!/system/bin/sh
+  clear; cd ${0%/*}
+# sing-box or mihomo🔴
+  kernel="mihomo"
+# can modify it to your own file.🔴
+  config_file="../config_files/ssc.yaml"
+# Proxy mode (tun tproxy for sing-box and mihomo, mixed only for sing-box)🔴
+  mode="tun"
+# Binary files
+  binfile="../binary_files/${kernel}"
+  normal=$(printf '\033[0m'); green=$(printf '\033[0;32m'); red=$(printf '\033[91m')
+  export PATH="/data/adb/magisk:/data/adb/ksu/bin:$PATH:/system/bin"
+# PROHIBIT MODIFYING FILE NAMES !!!
+  temp_backup_file="../config_files/temp_backup.json"
+  temp_output_file="../config_files/temp_output.json"
+# blacklist
+  package_list=(com.ss.android.ugc.aweme com.eg.android.AlipayGphone com.ss.android.article.lite com.coloros.favorite com.oplus.consumerIRApp com.tencent.mm com.redteamobile.roaming com.tencent.mobileqq com.unionpay.tsmservice com.netease.l10 com.coloros.filemanager com.oneplus.member com.taobao.taobao com.heytap.health com.coloros.note com.autonavi.minimap com.oneplus.brickmode com.cebbank.mobile.cemb com.coloros.compass2 com.coloros.calendar com.heytap.smarthome com.nearme.gamecenter com.coloros.soundrecorder com.coloros.shortcuts com.heytap.music com.coloros.familyguard com.finshell.wallet com.oneplus.bbs com.vmos.pro com.heytap.yoli cmb.pb com.coloros.translate.engine tv.danmaku.bili com.baidu.baidutranslate com.baidu.homework com.ss.android.article.video com.coloros.calculator com.jingdong.app.mall com.coloros.weather2 com.oplus.games)
+# IPv4 network segment
+  intranet=(0.0.0.0/8 10.0.0.0/8 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16 224.0.0.0/3 255.255.255.255/32)
+# IPv6 network segment
+  intranet6=(::/128 ::1/128 2408:8000::/20 2409:8000::/20 240a:4000::/21 240e::/20 fc00::/7 fe80::/10 ff00::/8)
+  intranet+=($(ip -4 a | busybox awk '/inet/ && $2 !~ /^127.0.0.1/ {print $2}'))
+  intranet6+=($(ip -6 a | busybox awk '/inet6/ && $2 !~ /^(fe80|::1|fd00)/ {print $2}'))
+  # check iptables_version
+  iptables_version=$(iptables --version | busybox awk '/^iptables/ {print $2}')
+  if busybox awk -v current_version="${iptables_version}" -v required_version="v1.6.1" 'BEGIN { exit !(current_version > required_version) }'; then
+    IPV="iptables -w 100"
+    IP6V="ip6tables -w 100"
+    else
+    IPV="iptables"
+    IP6V="ip6tables"
+  fi
+# Version information
+  [ "${kernel}" = "sing-box" ] && VERSION=$(${binfile} version | busybox awk '/sing-box/ {print $1, $3}')
+  [ "${kernel}" = "sing-box" ] && ${binfile} version | grep provider && provider="ᵖ"
+  [ "${kernel}" = "mihomo" ] && VERSION=$(${binfile} -v | busybox awk 'BEGIN{IGNORECASE=1} /mihomo/ {print $1, $3}')
+  echo $VERSION
+# The main body of the script.
+uid_filter() {
+[ -f "uids.list" ] && rm "uids.list"
+uid=""; uids=""
+for package_name in ${package_list[@]}; do
+    uid=$(busybox awk -v package="${package_name}" '$0 ~ package {print $2}' /data/system/packages.list)
+    [ -n "${uid}" ] && uids+=("${uid}")
+    echo "${package_name}: ${uid}" >> ${0%/*}/uids.list
+done
+}
+start_proxy() {
+  sysctl -w net.ipv4.conf.all.route_localnet=1
+  if [ -f "${binfile}" ]; then
+    chmod 755 ${binfile}
+    chown root:net_admin ${binfile}
+    ulimit -SHn 1048576
+    [ "${mode}" = "tproxy" ] && executeProxyRules
+    [ "${kernel}" = "mihomo" ] && [ "${mode}" = "tproxy" ] && executeDnsRedirectRules
+    [ "${kernel}" = "sing-box" ] && nohup busybox setuidgid 0:23333 ${binfile} run -c ${config_file} -D ../scripts/ > /dev/null 2>&1 &
+    [ "${kernel}" = "mihomo" ] && nohup busybox setuidgid 0:23333 ${binfile} -f ${config_file} -d ../data_files/ > /dev/null 2>&1 &
+  fi
+}
+stop_proxy() {
+  PID=$(pidof ${binfile})
+  [ "${kernel}" = "sing-box" ] && kill -15 ${PID} > /dev/null 2>&1
+  [ "${kernel}" = "mihomo" ] && kill -15 ${PID} > /dev/null 2>&1
+      if [ "${mode}" = "tproxy" ]; then
+        executeDeleteProxyRules
+      fi
+  rm ${0%/*}/*.list
+}
+inbounds_switcher() {
+  uid_filter
+  if [ "${kernel}" = "sing-box" ]; then
+  port="1536"
+  cp ${config_file} ${temp_backup_file}
+  ${binfile} version | grep -q provider && mkdir -p ../config_files/providers
+  [ "${mode}" = "tun" ] && busybox awk '/"inbounds"/ && !p {p=1; printf "\"inbounds\":[{\"type\": \"tun\", \"tag\": \"tun-in\", \"interface_name\": \"tun0\", \"mtu\": 9000, \"inet4_address\": \"172.19.0.1/30\", \"inet6_address\": \"fdfe:dcba:9876::1/126\", \"auto_route\": true, \"strict_route\": true, \"endpoint_independent_nat\": true, \"stack\": \"system\", \"sniff\": true, \"sniff_override_destination\": false, \"domain_strategy\": \"prefer_ipv4\"}],\n"; next} p && /"outbounds"/ {p=0} !p' ${temp_backup_file} > ${temp_output_file}
+  [ "${mode}" = "tproxy" ] && busybox awk '/"inbounds"/ && !p {p=1; printf "\"inbounds\": [{\"type\": \"tproxy\", \"tag\": \"tproxy-in\", \"listen\": \"::\", \"listen_port\": '"${port}"', \"tcp_fast_open\": true, \"sniff\": true, \"sniff_override_destination\": false, \"domain_strategy\": \"prefer_ipv4\"}],\n"; next} p && /"outbounds"/ {p=0} !p' ${temp_backup_file} > ${temp_output_file}
+  [ "${mode}" = "mixed" ] && busybox awk '/"inbounds"/ && !p {p=1; printf "\"inbounds\":[{\"type\": \"mixed\", \"tag\": \"mixed-in\", \"listen\": \"::\", \"listen_port\": '"${port}"', \"sniff\": true, \"sniff_override_destination\": false, \"domain_strategy\": \"prefer_ipv4\", \"set_system_proxy\": true}],\n"; next} p && /"outbounds"/ {p=0} !p' ${temp_backup_file} > ${temp_output_file}
+  ${binfile} format -w -c ${temp_output_file}
+  [ "${mode}" = "tun" ] && tun_filter
+  cp ${temp_output_file} ${config_file}
+  rm ${temp_backup_file} ${temp_output_file}
+  fi
+  if [ "${mode}" = "tun" ] && [ "${kernel}" = "mihomo" ]; then
+  Packages=$(IFS=","; echo "${package_list[*]}" | sed 's/,*//')
+  sed -i "s|^tproxy-port:.*|tun: { enable: true, stack: system, dns-hijack: [\"any:53\"], auto-route: true, auto-detect-interface: true, device: tun0, exclude-package: [${Packages}] }|" ${config_file}
+  sed -i "s|^tun:.*|tun: { enable: true, stack: system, dns-hijack: [\"any:53\"], auto-route: true, auto-detect-interface: true, device: tun0, exclude-package: [${Packages}] }|" ${config_file}
+  fi
+  if [ "${mode}" = "tproxy" ] && [ "${kernel}" = "mihomo" ]; then
+  port="9550"
+  sed -i "s|^tun:.*|tproxy-port: ${port}|" ${config_file}
+  sed -i "s|^tproxy-port:.*|tproxy-port: ${port}|" ${config_file}
+  fi
+}
+tun_filter() {
+array_length=${#package_list[@]}
+for i in $(seq $array_length -1 0); do
+  exclude="${package_list[i-2]}"
+  [ -n "${exclude}" ] && sed -i "/\"auto_route\": true,/a\"${exclude}\"," ${temp_output_file}
+done
+  sed -i "/\"auto_route\": true,/a\"exclude_package\": [" ${temp_output_file}
+  exclude="${package_list[$array_length - 2]}"
+  sed -i "/\"$exclude\",/a\"${package_list[$array_length-1]}\"" ${temp_output_file}
+  exclude="${package_list[$array_length - 1]}"
+  sed -i "/\"$exclude\"/a]," ${temp_output_file}
+  ${binfile} format -w -c ${temp_output_file}
+}
+createProxyRules() {
+  # Create routes and rules
+  ${1} rule add fwmark 1 table ${2}
+  ${1} route add local default dev lo table ${2}
+  # Create custom chain
+  ${3} -t mangle -N ${4}_EXTERNAL
+  ${3} -t mangle -N ${4}_LOCAL
+  ${3} -t mangle -N ${4}_QUIC_FILTER
+  ${3} -t mangle -N ${4}_DIVERT
+  # Create external custom chain rules
+for subnet in ${5}; do
+    if [[ "$subnet" == "192.168.0.0/16" ]]; then
+  ${3} -t mangle -A ${4}_EXTERNAL -d ${subnet} -p tcp -j RETURN
+  ${3} -t mangle -A ${4}_EXTERNAL -d ${subnet} -p udp ! --dport 53 -j RETURN
+    else
+  ${3} -t mangle -A ${4}_EXTERNAL -d ${subnet} -j RETURN
+    fi
+done
+  ${3} -t mangle -A ${4}_EXTERNAL -p tcp -j TPROXY --on-port ${port} --tproxy-mark 1
+  ${3} -t mangle -A ${4}_EXTERNAL -p udp -j TPROXY --on-port ${port} --tproxy-mark 1
+  # Create internal custom chain rules
+  ${3} -t mangle -A ${4}_LOCAL -m owner --gid-owner 23333 -j RETURN
+for subnet in ${5}; do
+    if [[ "$subnet" == "192.168.0.0/16" ]]; then
+  ${3} -t mangle -A ${4}_LOCAL -d ${subnet} -p tcp -j RETURN
+  ${3} -t mangle -A ${4}_LOCAL -d ${subnet} -p udp ! --dport 53 -j RETURN
+    else
+  ${3} -t mangle -A ${4}_LOCAL -d ${subnet} -j RETURN
+    fi
+done
+# Can't be used for mihomo.🔴
+    if [ "${kernel}" = "sing-box" ]; then
+      for appid in ${6}; do
+        ${3} -t mangle -A ${4}_LOCAL -m owner --uid-owner ${appid} -p tcp -j RETURN
+        ${3} -t mangle -A ${4}_LOCAL -m owner --uid-owner ${appid} -p udp ! --dport 53 -j RETURN
+        ${3} -t mangle -A ${4}_LOCAL -m owner --uid-owner ${appid} -j RETURN
+      done
+    fi
+  ${3} -t mangle -A ${4}_LOCAL -j MARK --set-mark 1
+  # Create QUIC_FILTER custom chain rules
+  ${3} -t mangle -A ${4}_QUIC_FILTER -p udp --dport 443 -j DROP
+  ${3} -t mangle -A ${4}_QUIC_FILTER -p udp --dport 80 -j DROP
+  # Prevent second entry into transparent proxy
+  ${3} -t mangle -A ${4}_DIVERT -j MARK --set-mark 1
+  ${3} -t mangle -A ${4}_DIVERT -j ACCEPT
+  # Referencing custom chains
+  ${3} -t mangle -A PREROUTING -j ${4}_EXTERNAL
+  ${3} -t mangle -I PREROUTING -p tcp -m socket -j ${4}_DIVERT
+  ${3} -t mangle -A OUTPUT -j ${4}_LOCAL
+  ${3} -t mangle -A OUTPUT -j ${4}_QUIC_FILTER
+  local list_name=$(echo ${3} | busybox awk '{print $1}')
+  ${3} -t mangle -L -nv > ${0%/*}/${list_name}_mangle_rules.list
+}
+executeProxyRules() {
+  createProxyRules ip 100 "${IPV}" Tproxy "${intranet[*]}" "${uids[*]}"
+  createProxyRules "ip -6" 106 "${IP6V}" Tproxy6 "${intranet6[*]}" "${uids[*]}"
+}
+deleteProxyRules() {
+  ${1} rule del fwmark 1 table ${2}
+  ${1} route del local default dev lo table ${2}
+  ${1} route flush table ${2}
+  # First, delete the reference chain, otherwise the custom chain cannot be deleted.
+  ${3} -t mangle -D PREROUTING -j ${4}_EXTERNAL
+  ${3} -t mangle -D PREROUTING -p tcp -m socket -j ${4}_DIVERT
+  ${3} -t mangle -D OUTPUT -j ${4}_LOCAL
+  ${3} -t mangle -D OUTPUT -j ${4}_QUIC_FILTER
+  # Secondly, delete the custom rules of the custom chain.
+  ${3} -t mangle -F ${4}_EXTERNAL
+  ${3} -t mangle -F ${4}_LOCAL
+  ${3} -t mangle -F ${4}_QUIC_FILTER
+  ${3} -t mangle -F ${4}_DIVERT
+  # Finally, delete the custom chain.
+  ${3} -t mangle -X ${4}_EXTERNAL
+  ${3} -t mangle -X ${4}_LOCAL
+  ${3} -t mangle -X ${4}_QUIC_FILTER
+  ${3} -t mangle -X ${4}_DIVERT
+  local list_name=$(echo ${3} | busybox awk '{print $1}')
+  
+  if [[ "${3}" == *iptables* ]]; then
+  # First, delete the reference chain, otherwise the custom chain cannot be deleted.
+  iptables -t nat -D PREROUTING -j DNS_EXTERNAL
+  iptables -t nat -D OUTPUT -j DNS_LOCAL
+  # Secondly, delete the custom rules of the custom chain.
+  iptables -t nat -F DNS_EXTERNAL
+  iptables -t nat -F DNS_LOCAL
+  # Finally, delete the custom chain.
+  iptables -t nat -X DNS_EXTERNAL
+  iptables -t nat -X DNS_LOCAL
+  fi
+}
+executeDeleteProxyRules() {
+  if iptables-save | grep "Tproxy" > /dev/null; then
+    deleteProxyRules ip 100 "${IPV}" Tproxy
+    deleteProxyRules "ip -6" 106 "${IP6V}" Tproxy6
+  fi
+}
+net_ip() {
+  local_ip=$(ip route get 1.1.1.1 | busybox awk '{for(i=1;i<=NF;i++) if ($i=="src") {print $(i+1); break}}') && echo "${local_ip}"
+}
+net_id() {
+# get wifi ssid
+  ssid=$(iw dev wlan0 link | grep -i ssid | busybox awk '{for(i=1;i<=NF;i++) if ($i=="SSID:") {print $(i+1); break}}')
+  [ -z "$ssid" ] && echo "mobile" || echo "${ssid}"
+}
+run_proxy() { stop_proxy; inbounds_switcher; start_proxy; }
+# Created on May 12 2024. 002
+# @router_set
+executeDnsRedirectRules() {
+  iptables -t nat -N DNS_EXTERNAL
+  iptables -t nat -N DNS_LOCAL
+  iptables -t nat -A DNS_EXTERNAL -p udp -m udp --dport 53 -j REDIRECT --to-port 1053
+  iptables -t nat -A DNS_EXTERNAL -p tcp -m tcp --dport 53 -j REDIRECT --to-port 1053
+  iptables -t nat -A DNS_EXTERNAL -d 198.18.0.1/16 -p icmp -j DNAT --to-destination 127.0.0.1
+  iptables -t nat -A DNS_LOCAL -m owner --gid-owner 23333 -j RETURN
+  iptables -t nat -A DNS_LOCAL -p udp -m udp --dport 53 -j REDIRECT --to-port 1053
+  iptables -t nat -A DNS_LOCAL -p tcp -m tcp --dport 53 -j REDIRECT --to-port 1053
+  iptables -t nat -A DNS_LOCAL -d 198.18.0.1/16 -p icmp -j DNAT --to-destination 127.0.0.1
+  
+  iptables -t nat -I PREROUTING -j DNS_EXTERNAL
+  iptables -t nat -I OUTPUT -j DNS_LOCAL
+  iptables -t nat -L -nv > ${0%/*}/iptables_nat_rules.list
+}
