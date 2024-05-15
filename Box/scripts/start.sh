@@ -8,8 +8,10 @@ clear; cd ${0%/*}
   
   source ./box.scripts
   
+  inot_gid=20002
+  
   [ ! -f ${MODDIR}/disable ] && run_proxy
   
-  pgrep inotifyd > /dev/null 2>&1 && pkill -g 23332
+  pgrep inotifyd > /dev/null 2>&1 && pkill -g ${inot_gid}
   
-  ${busybox} setuidgid 0:23332 inotifyd "${SCRIPTS_DIR}/box.inotify" "${MODDIR}" > /dev/null 2>&1 &
+  ${busybox} setuidgid 0:${inot_gid} inotifyd "${SCRIPTS_DIR}/box.inotify" "${MODDIR}" > /dev/null 2>&1 &
